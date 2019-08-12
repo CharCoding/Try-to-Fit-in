@@ -14,6 +14,11 @@ or click "Unselect".
 - R: Reset board (timer won't reset)
 - G: Give up (warns you before actually giving up)
 - Right clicking a piece will flip it _diagonally_
+
+# Issues
+- Tried to get game to pause when window is not in focus, doesn't seem to work
+- Some pieces are placed slightly off-center (due to even number of blocks)
+
 # Credits
 Original idea from _More Murderous Maths_ by Kjartan Poskitt
 Playtesting and feedback from @raptorcode

@@ -88,10 +88,11 @@
       this.calculateStyle();
     }
     reflect(axis) {
-      if(axis) {
+      if(axis & 1) {
         this.matrix.forEach(e => e.reverse());
         this.elem.dataset.flipY ^= -2;
-      } else {
+      }
+      if(axis & 2) {
         this.matrix.reverse();
         this.elem.dataset.flipX ^= -2;
       }
@@ -544,15 +545,15 @@
       elem = elem.parentElement;
     if('piece' == elem.className) {
       selected = pentaminos[elem.tabIndex - 1];
-      selected.reflect(0);
-      selected.reflect(1);
+      selected.reflect(3);
       e.preventDefault();
     } else if('c' == e.target.id) {
       if(selected) {
-        selected.reflect();
+        selected.reflect(3);
         e.preventDefault();
       }
     }
+    mouse.moved = true;
   };
   document.onclick = e => {
     let elem = e.target;
@@ -601,7 +602,7 @@
           break;
         case 38:
         case 87:
-          selected.reflect(0);
+          selected.reflect(1);
           break;
         case 39:
         case 68:
@@ -609,7 +610,7 @@
           break;
         case 40:
         case 83:
-          selected.reflect(1);
+          selected.reflect(2);
           break;
       }
       mouse.moved = true;
