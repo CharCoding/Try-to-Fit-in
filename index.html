@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Try to Fit in</title>
+  <script type="text/javascript">/*
+  Known bugs/issues:
+  - Buttons are not disabled when not supposed to be clicked
+  - Timer is badly implemented, page visibility detection doesn't work
+
+  Fixed bugs/issues:
+  - pieces now rotate and reflect correctly
+  - [325 more...]
+
+  TODOs:
+  - Add more badMsg and sadMsg
+  - Optimize */
+  const badMsg = ['Why are you still here?', 'Stop trying to fit in.', 'You don\'t deserve to be with us.',
+      'It\'s just not gonna work.', 'Just give up.', 'If you can\'t tell yet, we despise you.',
+      'All your effort is meaningless.', 'You\'re just not good enough.', 'Stay away from us.',
+      'Stop trying to drag us all down to your level.', 'Go away. Don\'t come back.',
+      'We don\'t hang out with your kind.', 'Nothing will change. You\'ll just keep looking stupid.',
+      'Trying a bit too hard to fit in here?', 'We don\'t have room for losers like you.',
+      'No matter how much you try, you still don\'t belong with us.', 'We don\'t want you here.',
+      'Stop wasting our time and leave.', 'I don\'t think you were invited.', 'Just... No.',
+      'You\'ll never become one of us.', 'We don\'t want to be associated with you.'],
+    sadMsg = 'I\'ll never be able to fit in...',
+    finMsg = 'We don\'t have to fit in! We just have to be ourselves and leave them behind!';
+  function Stopwatch(elem) {
+    this.time = 0;
+    this.pauseTime = 0; // closure to prevent messing with time
+    this.paused = true; // actually that's pointless. start/stop has to be exposed
+    this.clear = () => {
+      this.paused = true;
+      this.time = this.pauseTime = 0;
+    };
+    this.display = now => { // notice: implementation based on outside clock (frame())
+      if(this.paused) // it does not instantiate its own timer
+        this.pauseTime += now - this.time; // idk but there's probably a better way
+      this.time = now;
+      const ms = this.time - this.pauseTime;
+      if(!this.paused)
+        elem.textContent = (ms / 60000 | 0).toString().padStart(2, '0') + ':' + (ms % 60000 / 1000).toFixed(3).padStart(6, '0');
+      return ms; // in case called internally
+    };
+  }
+  class Pentamino { // big class that does everything
+    constructor(id, matrix) {
+      this.id = id;
+      this.elem = buttons[id];
+      this.matrix = matrix;
+      this.width = matrix.length;
+      this.height = matrix[0].length;
+    }
+    /* Truth table: rotation -= 1 - (direction ^ flipX == flipY) * 2
+    X Y D Expected xor
+    0 0 0   +1      0
+    0 0 1   -1      1
+    0 1 0   -1      1
+    0 1 1   +1      0
+    1 0 0   -1      1
+    1 0 1   +1      0
+    1 1 0   +1      0
+    1 1 1   -1      1
+    */// Explanaton: rotation is "mirrored" when the element is flipped an odd number of times.
+    // this.matrix doesn't remember past transforms but CSS transform does
+    rotate(direction) {
+      const newMatrix = new Array(this.height);
+      if(direction) {
+        for(let i = this.height; i--;) {
+          const row = new Uint8Array(this.width);
+          for(let j = this.width; j--;)
+            row[j] = this.matrix[this.width - 1 - j][i];
+          newMatrix[i] = row;
+        }
+      } else {
+        for(let i = this.height; i--;) {
+          const row = new Uint8Array(this.width);
+          for(let j = this.width; j--;)
+            row[j] = this.matrix[j][this.height - 1 - i];
+          newMatrix[i] = row;
+        }
+      } // the following works (see truth table), can't be bothered to change it
+      this.elem.dataset.rotate -= 1 - (direction ^ this.elem.dataset.flipX == this.elem.dataset.flipY) * 2;
+      this.height = this.width;
+      this.matrix = newMatrix;
+      this.width = newMatrix.length;
+      this.calculateStyle();
+    }
+    reflect(axis) {
+      if(axis) {
+        this.matrix.forEach(e => e.reverse());
+        this.elem.dataset.flipY ^= -2;
+      } else {
+        this.matrix.reverse();
+        this.elem.dataset.flipX ^= -2;
+      }
+      this.calculateStyle();
+    }
+    print() {
+      let str = '';
+      for(let j = 0; j < this.height; ++j) {
+        for(let i = 0; i < this.width; ++i)
+          str += this.matrix[i][j].toString(16);
+        str += '\n';
+      }
+      console.log(str);
+    }
+    draw() {
+      t.fillStyle = `hsl(${this.id * 30},100%,50%)`;
+      t.lineWidth = 3;
+      t.strokeStyle = '#000';
+      t.beginPath();
+      for(let i = this.width; i--;)
+        for(let j = this.height; j--;) {
+          const I = i + mouse.mapX - (this.width >> 1), J = j + mouse.mapY - (this.height >> 1);
+          if(this.matrix[i][j]) {
+            t.fillRect(I * board.side, J * board.side, board.side, board.side);
+            let val;
+            if(!map[I] || 0 != (val = map[I][J])) {
+              t.moveTo(I * board.side, J * board.side);
+              t.lineTo((I + 1) * board.side, (J + 1) * board.side);
+              t.moveTo(I * board.side, (J + 1) * board.side);
+              t.lineTo((I + 1) * board.side, J * board.side);
+              if(board.piecesPlaced < 4 || val < 0) continue;
+              val %= 12;
+              if(val < 6 && leftDialog.hidden)
+                pentaminos[val].say();
+              else if(val > 5 && rightDialog.hidden)
+                pentaminos[val].say();
+            }
+          }
+        }
+      t.stroke();
+    }
+    place() {
+      const blocks = [];
+      for(let i = this.width; i--;)
+        for(let j = this.height; j--;)
+          if(this.matrix[i][j]) {
+            const I = i + mouse.mapX - (this.width >> 1), J = j + mouse.mapY - (this.height >> 1);
+            if(!map[I] || 0 != map[I][J])
+              return false;
+            else
+              blocks.push(J, I); // due to unrolling on line 151/152
+          }
+      for(let i = 10; i;) // unrolling + double decrement (don't do this)
+        map[blocks[--i]][blocks[--i]] = this.id || 12;
+      selected = null;
+      mouse.moved = true; // ensure a draw cycle
+      buttons[this.id].classList.add('placed');
+      if(12 == ++board.piecesPlaced)
+        levelUp();
+      else if(level == 6) {
+        if(1 == board.piecesPlaced) {
+          initMap(this.width * 3, this.height * 3);
+          for(let i = this.width; i--;)
+            for(let j = this.height; j--;)
+              if(!this.matrix[i][j])
+                for(let k = 3; k--;)
+                  for(let l = 3; l--;)
+                    map[i * 3 + k][j * 3 + l] = -1;
+          mouse.moved = true;
+        } else if(10 == board.piecesPlaced)
+          win();
+      }
+    }
+    calculateStyle() {
+      const {rotate, flipX, flipY} = this.elem.dataset; // "destructuring" (it works, whatever.)
+      this.elem.style.transform = `scale(${flipX},${flipY}) rotate(${rotate * 90}deg)`;
+    }
+    say(stuff, time = 4096){
+      const dialog = this.id < 6 ? leftDialog : rightDialog;
+      dialog.textContent = stuff || badMsg[Math.random() * badMsg.length | 0];
+      dialog.style.top = this.id % 6 * 16 + 'vh';
+      dialog.hidden = false;
+      setTimeout(() => dialog.hidden = true, time);
+    }
+  }
+  </script>
+  <style type="text/css">
+  body {
+    background-color: #000;
+    color: #eee;
+    margin: 0;
+    overflow: hidden;
+    font-size: 3vh;
+  }
+  .holder {
+    position: absolute;
+    margin: 1.5vh 52vh;
+    left: 50%;
+    overflow: visible;
+  }
+  .holder:first-child {
+    right: 50%;
+    left: unset;
+  }
+  .piece {
+    position: relative;
+    width: 15vh;
+    height: 15vh;
+    margin-top: 1vh;
+    border: .5vh solid #333;
+    border-radius: 8vh;
+    box-shadow: none;
+    padding: 1px;
+    box-sizing: border-box;
+    transition-property: transform box-shadow border-color;
+    transition-duration: 160ms;
+  }
+  .piece:hover { border-color: transparent; box-shadow: 0 0 .5vh .5vh #999; }
+  .piece:focus { border-color: transparent; box-shadow: 0 0 .5vh .5vh #fff; outline: none; }
+  .placed:hover, .placed:focus { box-shadow: none; border-color: #333; }
+  .placed:active { border-color: red; box-shadow: 0 0 .5vh .5vh #f00; }
+  .square {
+    position: absolute;
+    margin: 1px;
+    width: 2.8vh;
+    height: 2.8vh;
+    box-sizing: border-box;
+    border: 1px solid #fff;
+    transition-property: background-color border-color;
+    transition-duration: 1s;
+  }
+  .placed > .square { background-color: #000 !important; }
+  #leftDialog, #rightDialog {
+    position: absolute;
+    top: 0;
+    width: max-content;
+    z-index: 2;
+    background-color: rgba(0, 0, 0, 0.8);
+    padding: 2px;
+    border: 1px solid #eee;
+    font-size: 2vh;
+  }
+  #leftDialog { left: 0px; }
+  #leftDialog::after, #rightDialog::after {
+    content: "";
+    display: block;
+    position: absolute;
+    width: 0;
+    margin-top: 2px;
+    border: 25px solid transparent;
+    border-top: 50px solid white;
+    border-bottom: 0;
+  }
+  #leftDialog::after {
+    border-left-width: 10px;
+    left: 50px;
+  }
+  #rightDialog::after {
+    border-right-width: 10px;
+    right: 50px;
+  }
+  #rightDialog { right: 0; }
+  canvas {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 100vh;
+    height: 100%;
+    margin-left: -50vh;
+    background-color: #333;
+  }
+  .clock {
+    position: absolute;
+    display: block;
+    top: 1vh;
+    margin: 0 5vh;
+    right: 50%;
+  }
+  #clock::before { content: "Current Level: "; }
+  #totalClock {
+    left: 50%;
+    right: unset;
+    color: #f00;
+  }
+  #totalClock::before { content: "Total Time: "; }
+  .gui {
+    position: absolute;
+    width: 96vh;
+    left: 50%;
+    bottom: 1vh;
+    margin-left: -48vh;
+    font-size: 3vh;
+  }
+  .gui button {
+    font-size: 2vh;
+    float: right;
+    margin-left: 2vh;
+  }
+  #overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+  }
+  h1 {
+    text-align: center;
+    font-size: 8vh;
+    margin: 4vh 0;
+  }
+  h3 {
+    font-size: 4vh;
+    margin: 3vh 0;
+  }
+  p { text-align: center; }
+  a { color: white; }
+  #titleContent, #giveUpContent, #levelUpContent, #winContent {
+    position: relative;
+    width: 96vh;
+    left: 50%;
+    margin-left: -48vh;
+  }
+  .buttons {
+    position: relative;
+    width: 48vh;
+    left: 50%;
+    margin-left: -24vh;
+    text-align: center;
+  }
+  .buttons input {
+    font-size: 3vh;
+    width: 20vh;
+    margin: 1vh;
+  }
+  </style>
+</head>
+<body>
+  <div class="holder">
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div id="leftDialog" hidden="true"></div>
+  </div>
+  <canvas id="c"></canvas>
+  <div class="holder">
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div class="piece"></div>
+    <div id="rightDialog" hidden="true"></div>
+  </div>
+  <span class="clock" id="clock">00:00.000</span>
+  <span class="clock" id="totalClock">00:00.000</span>
+  <div class="gui">
+    <button id="giveup"><u>G</u>ive up</button>
+    <button id="reset"><u>R</u>eset</button>
+    <button id="pause"><u>P</u>ause</button>
+    <button id="unselect"><u>U</u>nselect</button>
+  </div>
+  <div id="overlay">
+    <h1 id="title">Try to Fit in</h1>
+    <div id="titleContent">
+      <p>Version 1.0 by <a href="https://github.com/CharCoding/">CharCoding</a>, 2019, Some Rights Reserved.</p>
+      <h3>Goal:</h3>
+      Fit all 12 pentaminos into the given grid. There are 7 levels, progressively getting harder.
+      <h3>How to play:</h3>
+      Select a pentamino from either side, use &larr;/A and &rarr;/D to rotate, &uarr;/W to flip
+      vertically and &darr;/S to flip horizontally, and click the desired square in the grid to place
+      down the piece.<br /><br />
+      To remove a placed pentamino from the grid, click on one of its tiles and place it elsewhere
+      or click "Unselect".<br /><br />
+      Your score is based on the red clock. Think fast!<br /><br />
+    </div>
+    <div id="giveUpContent" hidden="true">
+      You gave up whilst trying to fit in. Maybe you shouldn't have tried in the first place.
+    </div>
+    <div id="levelUpContent" hidden="true">
+      <h3>You finally managed to fit in. Congrats, I guess.</h3>
+      Hopefully you didn't create too many fake personalities and false impressions whilst trying to
+      fit in.<br /><br />
+      Maybe try to be true to yourself for once?
+    </div>
+    <div id="winContent" hidden="true">
+      <h3>You won.</h3>
+      It took you <span id="totalTime"></span> seconds to realize that it wasn't worth it to try to
+      fit in.<br /><br />
+      I don't think you'd ever want to force yourself to do that again.
+    </div>
+    <div class="buttons">
+      <input type="button" id="start" value="Start" />
+      <input type="button" id="menugiveup" value="Give up" />
+    </div>
+  </div>
+  <script type="text/javascript">'use strict';
+  const t = c.getContext('2d'),
+    pentaminos = [31,47,79,103,110,167,1063,1126,1249,1250,1252,2274], // compressed format
+    mouse = { x: 0, y: 0, mapX: 0, mapY: 0, moved: true },
+    buttons = document.getElementsByClassName('piece'),
+    getW = x => Math.ceil(Math.log2((x >> 10 | x >> 5 | x) & 31)),
+    getH = x => Math.ceil(Math.log2(x) / 5),
+    recursiveTake = (id, x, y) => { // 8150896209433334..toString(28)
+      map[x][y] = 0;
+      if(x > 0 && id == map[x - 1][y])
+        recursiveTake(id, x - 1, y);
+      if(x < board.width - 1 && id == map[x + 1][y])
+        recursiveTake(id, x + 1, y);
+      if(y > 0 && id == map[x][y - 1])
+        recursiveTake(id, x, y - 1);
+      if(y < board.height - 1 && id == map[x][y + 1])
+        recursiveTake(id, x, y + 1);
+    }, // surprisingly more efficient than going through all 60+ grids
+    levels = [[8, 8], [9, 7], [10, 6], [12, 5], [15, 4], [20, 3], [5, 3]],
+    board = { width: 0, height: 0, side: 0, offsetX: 0, offsetY: 0, piecesPlaced: 0 },
+    stopwatch = new Stopwatch(clock),
+    totalStopwatch = new Stopwatch(totalClock);
+  let h = window.innerHeight, map, level = 0, highscore = 3600000, timer, selected;
+  c.width = c.height = h;
+  t.font = '20px Arial';
+  function initMino(x, id, arr) { // Warning, magic ahead.
+    const width = getW(x), height = getH(x), parent = buttons[id], matrix = new Array(width);
+    parent.dataset.rotate = 0;
+    parent.dataset.flipX = parent.dataset.flipY = 1;
+    parent.tabIndex = id + 1;
+    for(let i = width; i--;)
+      matrix[i] = new Uint8Array(height);
+    for(let i = 5; i--;) {
+      const div = document.createElement('div');
+      div.className = 'square';
+      div.style.backgroundColor = `hsl(${id * 30},100%,50%)`;
+      let y = Math.log2(x) | 0;
+      x ^= 1 << y; // what kind of math is this???
+      const l = width - 1 - y % 5, t = height - 1 - (y / 5 | 0);
+      div.style.left = (l + (5 - width) / 2) * 2.8 + 'vh';
+      div.style.top = (t + (5 - height) / 2) * 2.8 + 'vh';
+      parent.appendChild(div);
+      matrix[l][t] = id || 12;
+    }
+    arr[id] = new Pentamino(id, matrix);
+  }
+  function initMap(x = levels[level][0], y = levels[level][1]) {
+    board.width = x;
+    board.height = y;
+    map = new Array(board.width);
+    for(let i = board.width; i--;)
+      map[i] = new Int8Array(board.height);
+    board.side = h / (Math.max(board.width, board.height) + 1) | 0;
+    board.offsetX = (h - board.width * board.side) / 2;
+    board.offsetY = (h - board.height * board.side) / 2;
+  }
+  function levelUp() {
+    board.piecesPlaced = 0;
+    for(let i = 12; i--;)
+      buttons[i].classList.remove('placed');
+    stopwatch.clear();
+    totalStopwatch.paused = true;
+    ++level;
+    initMap();
+    overlay.hidden = levelUpContent.hidden = false;
+    giveUpContent.hidden = titleContent.hidden = true;
+    start.value = 'Next level';
+  }
+  function win() {
+    board.piecesPlaced = 0;
+    stopwatch.clear();
+    totalStopwatch.paused = true;
+    const unplaced = pentaminos.filter(e => e.elem.className == 'piece'),
+      score = totalStopwatch.display(performance.now());
+    totalTime.textContent = Math.round(score / 1000);
+    unplaced[0].say(sadMsg, 6000);
+    title.textContent = 'Don\'t Always ' + title.textContent;
+    start.value = 'Start';
+    level = 0;
+    setTimeout(() => unplaced[1].say(finMsg, 6000), 6000);
+    setTimeout(() => {
+      totalStopwatch.clear();
+      overlay.hidden = winContent.hidden = false;
+      titleContent.hidden = levelUpContent.hidden = giveUpContent.hidden = true;
+      initMap();
+      for(let i = 12; i--;)
+        buttons[i].classList.remove('placed');
+    }, 12000);
+  }
+  function draw() {
+    t.clearRect(0, 0, h, h);
+    t.translate(board.offsetX, board.offsetY);
+    const maxX = h - board.offsetX * 2, maxY = h - board.offsetY * 2;
+    for(let i = board.width; i--;)
+      for(let j = board.height; j--;) {
+        const val = map[i][j];
+        if(!val) continue;
+        if(val < 0)
+          t.fillStyle = '#000';
+        else
+          t.fillStyle = `hsl(${val * 30},100%,25%)`;
+        t.fillRect(i * board.side, j * board.side, board.side, board.side);
+      }
+    if(selected)
+      selected.draw();
+    t.lineWidth = 1;
+    t.strokeStyle = '#888';
+    t.beginPath();
+    for(let i = 0; i <= maxY; i += board.side) {
+      t.moveTo(0, i);
+      t.lineTo(maxX, i);
+    }
+    for(let i = 0; i <= maxX; i += board.side) {
+      t.moveTo(i, 0);
+      t.lineTo(i, maxY);
+    }
+    t.stroke();
+    t.translate(-board.offsetX, -board.offsetY);
+    // TODO: remove debug
+    t.fillStyle = '#fff';
+    t.fillText(`Pixel: (${mouse.x}, ${mouse.y}), Map: (${mouse.mapX}, ${mouse.mapY}), Board: ${board.piecesPlaced}`, 20, h - 20);
+  }
+  /*
+  window.onblur = document.onvisibilitychange = e => { // doesn't really work
+    if(document.hidden)
+      stopwatch.paused = totalStopwatch.paused = true;
+    // else
+      // display pausing menu
+  };
+  window.addEventListener('focus', e => { // no point in implementing if the function above doesn't work
+
+  }, false);
+  */
+  window.onresize = e => { // why would you ever resize your browser??
+    if(h != window.innerHeight) { // especially resizing the window height??
+      c.width = c.height = h = window.innerHeight;
+      t.font = '20px Arial';
+      board.side = h / (Math.max(board.width, board.height) + 1) | 0;
+      board.offsetX = (h - board.width * board.side) / 2;
+      board.offsetY = (h - board.height * board.side) / 2;
+      mouse.moved = true;
+    }
+  }; // too bad IT'S ALL RESPONSIVE DESIGN
+  window.onbeforeunload = e => {
+    e.preventDefault();
+    e.returnValue = '';
+  };
+  document.oncontextmenu = e => { // right click actually flips the pieces diagonally
+    let elem = e.target;
+    if('square' == elem.className)
+      elem = elem.parentElement;
+    if('piece' == elem.className) {
+      selected = pentaminos[elem.tabIndex - 1];
+      selected.reflect(0);
+      selected.reflect(1);
+      e.preventDefault();
+    } else if('c' == e.target.id) {
+      if(selected) {
+        selected.reflect();
+        e.preventDefault();
+      }
+    }
+  };
+  document.onclick = e => {
+    let elem = e.target;
+    if('square' == elem.className)
+      elem = elem.parentElement;
+    if('piece' == elem.className)
+      selected = pentaminos[elem.tabIndex - 1]; // selecting a piece
+    else if('c' == elem.id) {
+      if(selected)
+        selected.place();
+      else if(map[mouse.mapX]) {
+        let val = map[mouse.mapX][mouse.mapY];
+        if(0 < val) { // mouse on a placed piece
+          --board.piecesPlaced; // taking a piece
+          recursiveTake(val, mouse.mapX, mouse.mapY);
+          val %= 12;
+          selected = pentaminos[val];
+          buttons[val].focus();
+          buttons[val].classList.remove('placed');
+          mouse.moved = true;
+        }
+      }
+    } else
+      selected = null;
+  };
+  document.onkeydown = e => {
+    if(e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return; // don't interfere with reload, etc.
+    if(e.keyCode == 27 || e.keyCode == 80) {
+      if(stopwatch.paused) {
+        if(stopwatch.display(performance.now()) != 0)
+          start.click();
+      } else
+        pause.click();
+    } else if(e.keyCode == 71)
+      giveup.click();
+    else if(e.keyCode == 82)
+      reset.click();
+    else if(e.keyCode == 85) {
+      document.activeElement.blur();
+      unselect.click();
+    } else if(selected) {
+      switch(e.keyCode) {
+        case 37:
+        case 65:
+          selected.rotate(1);
+          break;
+        case 38:
+        case 87:
+          selected.reflect(0);
+          break;
+        case 39:
+        case 68:
+          selected.rotate(0);
+          break;
+        case 40:
+        case 83:
+          selected.reflect(1);
+          break;
+      }
+      mouse.moved = true;
+    }
+  };
+  c.onmousemove = e => {
+    mouse.x = e.offsetX;
+    mouse.y = e.offsetY;
+    mouse.mapX = (mouse.x - board.offsetX) / board.side | 0;
+    mouse.mapY = (mouse.y - board.offsetY) / board.side | 0;
+    mouse.moved = true;
+  };
+  start.onclick = e => {
+    overlay.hidden = true;
+    stopwatch.paused = totalStopwatch.paused = false;
+    draw();
+  };
+  unselect.onclick = e => {
+    selected = null;
+    draw();
+  };
+  pause.onclick = e => {
+    giveUpContent.hidden = levelUpContent.hidden = true;
+    overlay.hidden = titleContent.hidden = menugiveup.hidden = false;
+    start.value = 'Continue';
+    stopwatch.paused = totalStopwatch.paused = true;
+    draw();
+  };
+  reset.onclick = e => {
+    if(confirm('Are you sure to reset the board? The timer will not reset.')) {
+      for(let i = 12; i--;)
+        buttons[i].classList.remove('placed');
+      board.piecesPlaced = 0;
+      initMap();
+      draw();
+    }
+  };
+  menugiveup.onclick = giveup.onclick = e => { // might have missed some stuff here, idk
+    if(!confirm('Are you sure to give up?')) return;
+    overlay.hidden = titleContent.hidden = levelUpContent.hidden = menugiveup.hidden = true;
+    giveUpContent.hidden = false; // a whole lot of things has to be reset
+    start.value = 'Retry';
+    board.piecesPlaced = 0;
+    stopwatch.clear();
+    totalStopwatch.clear();
+    const left = [], right = [];
+    pentaminos.forEach((e, i) => {
+      if(e.elem.className == 'piece')
+        if(i < 6)
+          left.push(e);
+        else
+          right.push(e);
+    });
+    if(left.length)
+      left[Math.random() * left.length | 0].say(sadMsg);
+    if(right.length)
+      right[Math.random() * right.length | 0].say(sadMsg);
+    setTimeout(() => {
+      for(let i = 12; i--;)
+        buttons[i].classList.remove('placed');
+      board.piecesPlaced = level = 0;
+      initMap();
+      draw();
+      overlay.hidden = false
+    }, 5000);
+  };
+  function frame(now) {
+    if(mouse.moved) { // save frames
+      mouse.moved = false;
+      draw();
+    }
+    stopwatch.display(now); // but update the stopwatch as fast as possible
+    totalStopwatch.display(now); // uncertainty is +-17ms
+    timer = requestAnimationFrame(frame);
+  }
+  pentaminos.forEach(initMino);
+  initMap();
+  timer = requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
