@@ -2,11 +2,13 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
   <title>Try to Fit in</title>
   <script type="text/javascript">/*
   Known bugs/issues:
   - Buttons are not disabled when not supposed to be clicked
   - Timer is badly implemented, page visibility detection doesn't work
+  - 2edgy4me
 
   Fixed bugs/issues:
   - pieces now rotate and reflect correctly
@@ -24,7 +26,7 @@
       'No matter how much you try, you still don\'t belong with us.', 'We don\'t want you here.',
       'Stop wasting our time and leave.', 'I don\'t think you were invited.', 'Just... No.',
       'You\'ll never become one of us.', 'We don\'t want to be associated with you.'],
-    sadMsg = 'I\'ll never be able to fit in...',
+    sadMsg = ['I\'ll never be able to fit in...','I\'ll be forever alone...','I\'m all by myself...'],
     finMsg = 'We don\'t have to fit in! We just have to be ourselves and leave them behind!';
   function Stopwatch(elem) {
     this.time = 0;
@@ -467,7 +469,7 @@
     const unplaced = pentaminos.filter(e => e.elem.className == 'piece'),
       score = totalStopwatch.display(performance.now());
     totalTime.textContent = Math.round(score / 1000);
-    unplaced[0].say(sadMsg, 6000);
+    unplaced[0].say(sadMsg[Math.random() * 3 | 0], 6000);
     title.textContent = 'Don\'t Always ' + title.textContent;
     start.value = 'Start';
     level = 0;
@@ -511,8 +513,8 @@
     t.stroke();
     t.translate(-board.offsetX, -board.offsetY);
     // TODO: remove debug
-    t.fillStyle = '#fff';
-    t.fillText(`Pixel: (${mouse.x}, ${mouse.y}), Map: (${mouse.mapX}, ${mouse.mapY}), Board: ${board.piecesPlaced}`, 20, h - 20);
+    // t.fillStyle = '#fff';
+    // t.fillText(`Pixel: (${mouse.x}, ${mouse.y}), Map: (${mouse.mapX}, ${mouse.mapY}), Board: ${board.piecesPlaced}`, 20, h - 20);
   }
   /*
   window.onblur = document.onvisibilitychange = e => { // doesn't really work
@@ -665,16 +667,16 @@
           right.push(e);
     });
     if(left.length)
-      left[Math.random() * left.length | 0].say(sadMsg);
+      left[Math.random() * left.length | 0].say(sadMsg[Math.random() * 3 | 0], 5000);
     if(right.length)
-      right[Math.random() * right.length | 0].say(sadMsg);
+      right[Math.random() * right.length | 0].say(sadMsg[Math.random() * 3 | 0], 5000);
     setTimeout(() => {
       for(let i = 12; i--;)
         buttons[i].classList.remove('placed');
       board.piecesPlaced = level = 0;
       initMap();
       draw();
-      overlay.hidden = false
+      overlay.hidden = false;
     }, 5000);
   };
   function frame(now) {
